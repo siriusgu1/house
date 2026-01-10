@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>购房预算 & 利息对比（等额本息主模型）</title>
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="购房计算器">
+<link rel="apple-touch-icon" href="icon.png"
+<style>
+body { font-family: Arial; max-width: 900px; margin: auto; }
+table { border-collapse: collapse; }
+td { padding: 6px; }
+input { width: 150px; }
+button { padding: 8px 16px; margin-top: 10px; }
+h3 { margin-top: 30px; }
+.note { color: #555; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h2>购房预算计算器（等额本息）</h2>
+
+<table>
+<tr><td>每月税后收入</td><td><input id="income" value="50000"></td></tr>
+<tr><td>每月公积金</td><td><input id="gjj" value="8000"></td></tr>
+<tr><td>年终奖</td><td><input id="bonus" value="0"></td></tr>
+<tr><td><b>年消费（不含房贷）</b></td><td><input id="expenseYear" value="220000"></td></tr>
+<tr><td>每月预期存款</td><td><input id="save" value="3000"></td></tr>
+<tr><td>首付存款总额</td><td><input id="savings" value="3500000"></td></tr>
+<tr><td>公积金贷款上限</td><td><input id="gjjLoan" value="1300000"></td></tr>
+<tr><td>公积金利率 (%)</td><td><input id="gjjRate" value="2.6"></td></tr>
+<tr><td>商贷利率 (%)</td><td><input id="comRate" value="3.05"></td></tr>
+<tr><td>贷款年限</td><td><input id="years" value="30"></td></tr>
+</table>
+
+<button onclick="calculate()">计算购房预算</button>
+<div id="result"></div>
+
+<h3>等额本息 vs 等额本金（利息对比）</h3>
+<div class="note">
+说明：以下对比仅用于衡量“为前期低月供多付出的利息成本”，<br>
+不影响上方购房预算计算（始终按等额本息）。
+</div>
+<div id="interestCompare"></div>
+
+<h3>提前还款 / 双利率下调（等额本息）</h3>
+
+<table>
+<tr><td>提前还款发生在第几年</td><td><input id="prepayYear" value="5"></td></tr>
+<tr><td>一次性提前还款金额（商贷）</td><td><input id="prepayAmount" value="500000"></td></tr>
+<tr><td>下调后商贷利率 (%)</td><td><input id="newComRate" value="2.7"></td></tr>
+<tr><td>下调后公积金利率 (%)</td><td><input id="newGjjRate" value="2.3"></td></tr>
+</table>
+
+<button onclick="simulate()">模拟提前还款 / 降息</button>
+<div id="simulateResult"></div>
+
+<script>
+// ===== 基础公式 =====
+function paymentBenxi(p, rate, years) {
+    let r = rate / 12;
+    let n = years * 12;
+    return p * r * Math.pow(1 + r, n) / (Math.pow(1 + r, n) - 1);
+}
+
+function totalInterestBenxi(p, rate, years) {
+    let m = paymentBenxi(p, rate, years);
+    return m * years * 12 - p;
+}
+
+function totalInterestBenjin(p, rate, years) {
+    let n = years * 12;
+    let monthlyPrincipal = p / n;
+    let totalInterest = 0;
+    for (let i = 0; i < n; i++) {
+        totalInterest += (p - monthlyPrincipal * i) * rate / 12;
+    }
+    return totalInterest;
+}
+
+function remainingBenxi(p, rate, years, paidMonths) {
+    let r = rate / 12;
+    let m = paymentBenxi(p, rate, years);
+    return p * Math.pow(1 + r, paidMonths) -
+           m * (Math.pow(1 + r, paidMonths) - 1) / r;
+}
+
+// ===== 购房预算 =====
+function calculate() {
+    let income = +incomeInput.value;
+    let gjj = +gjjInput.value;
+    let bonus = +bonusInput.value / 12;
+    let expenseMonth = +expenseYearInput.value / 12;
+    let save = +saveInput.value;
+    let savings = +savingsInput.value;
+    let gjjLoan = +gjjLoanInput.value;
+    let gjjRate = +gjjRateInput.value / 100;
+    let comRate = +comRateInput.value / 100;
+    let years = +yearsInput.value;
+
+    let cashForMortgage = income + bonus - expenseMonth - save;
+    let totalMonthly = cashForMortgage + gjj;
+
+    let gjjPay = paymentBenxi(gjjLoan, gjjRate, years);
+    let comPayCapacity = totalMonthly - gjjPay;
+
+    let comLoan = comPayCapacity > 0
+        ? comPayCapacity *
+          (Math.pow(1 + comRate/12, years*12) - 1) /
+          ((comRate/12) * Math.pow(1 + comRate/12, years*12))
+        : 0;
+
+    window._state = { gjjLoan, gjjRate, comLoan, comRate, years };
+
+    let totalLoan = gjjLoan + comLoan;
+    let houseBudget = totalLoan + savings;
+
+    result.innerHTML = `
+      <h3>购房预算结果</h3>
+      每月可用于还贷现金：${cashForMortgage.toFixed(0)} 元<br>
+      总可承担月供：${totalMonthly.toFixed(0)} 元<br>
+      公积金月供：${gjjPay.toFixed(0)} 元<br>
+      商贷月供：${comPayCapacity.toFixed(0)} 元<br>
+      商贷总额：${(comLoan/10000).toFixed(1)} 万<br>
+      <b>购房总预算：${(houseBudget/10000).toFixed(1)} 万</b>
+    `;
+
+    // ===== 利息对比 =====
+    let interestBX = totalInterestBenxi(comLoan, comRate, years);
+    let interestBJ = totalInterestBenjin(comLoan, comRate, years);
+
+    interestCompare.innerHTML = `
+      商贷金额：${(comLoan/10000).toFixed(1)} 万<br>
+      等额本息总利息：${(interestBX/10000).toFixed(1)} 万<br>
+      等额本金总利息：${(interestBJ/10000).toFixed(1)} 万<br>
+      <b>等额本息多付利息：${((interestBX - interestBJ)/10000).toFixed(1)} 万</b>
+    `;
+}
+
+// ===== 提前还款 / 双利率 =====
+function simulate() {
+    if (!window._state) {
+        simulateResult.innerHTML = "请先计算购房预算";
+        return;
+    }
+
+    let { gjjLoan, gjjRate, comLoan, comRate, years } = window._state;
+    let prepayYear = +prepayYearInput.value;
+    let prepayAmount = +prepayAmountInput.value;
+    let newComRate = +newComRateInput.value / 100;
+    let newGjjRate = +newGjjRateInput.value / 100;
+    let paidMonths = prepayYear * 12;
+    let remainYears = years - prepayYear;
+
+    let comRemain = remainingBenxi(comLoan, comRate, years, paidMonths);
+    let gjjRemain = remainingBenxi(gjjLoan, gjjRate, years, paidMonths);
+
+    let comRemainAfter = Math.max(comRemain - prepayAmount, 0);
+
+    let oldTotalInterest =
+        totalInterestBenxi(comRemain, comRate, remainYears) +
+        totalInterestBenxi(gjjRemain, gjjRate, remainYears);
+
+    let newTotalInterest =
+        totalInterestBenxi(comRemainAfter, newComRate, remainYears) +
+        totalInterestBenxi(gjjRemain, newGjjRate, remainYears);
+
+    simulateResult.innerHTML = `
+      <h3>提前还款 / 降息结果（等额本息）</h3>
+      剩余商贷本金：${(comRemain/10000).toFixed(1)} → ${(comRemainAfter/10000).toFixed(1)} 万<br>
+      剩余公积金本金：${(gjjRemain/10000).toFixed(1)} 万<br><br>
+      原剩余总利息：${(oldTotalInterest/10000).toFixed(1)} 万<br>
+      新剩余总利息：${(newTotalInterest/10000).toFixed(1)} 万<br>
+      <b>节省利息：${((oldTotalInterest - newTotalInterest)/10000).toFixed(1)} 万</b>
+    `;
+}
+
+// DOM
+const incomeInput = document.getElementById("income");
+const gjjInput = document.getElementById("gjj");
+const bonusInput = document.getElementById("bonus");
+const expenseYearInput = document.getElementById("expenseYear");
+const saveInput = document.getElementById("save");
+const savingsInput = document.getElementById("savings");
+const gjjLoanInput = document.getElementById("gjjLoan");
+const gjjRateInput = document.getElementById("gjjRate");
+const comRateInput = document.getElementById("comRate");
+const yearsInput = document.getElementById("years");
+const prepayYearInput = document.getElementById("prepayYear");
+const prepayAmountInput = document.getElementById("prepayAmount");
+const newComRateInput = document.getElementById("newComRate");
+const newGjjRateInput = document.getElementById("newGjjRate");
+const inputs = document.querySelectorAll("input");
+
+// 读取
+inputs.forEach(i => {
+  const v = localStorage.getItem(i.id);
+  if (v !== null) i.value = v;
+});
+
+// 保存
+inputs.forEach(i => {
+  i.addEventListener("input", () => {
+    localStorage.setItem(i.id, i.value);
+  });
+});
+
+// 注册 Service Worker
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
+}
+</script>
+
+</body>
+</html>
